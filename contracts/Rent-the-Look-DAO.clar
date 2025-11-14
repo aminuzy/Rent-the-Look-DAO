@@ -11,6 +11,8 @@
 (define-constant err-insufficient-stake (err u107))
 (define-constant err-no-stake (err u108))
 (define-constant err-invalid-params (err u109))
+(define-constant err-invalid-rating (err u110))
+(define-constant err-not-returned (err u111))
 
 (define-data-var next-outfit-id uint u1)
 (define-data-var total-staked uint u0)
@@ -50,6 +52,19 @@
 (define-map user-outfits
     principal
     (list 100 uint)
+)
+
+(define-map outfit-ratings
+    uint
+    {
+        total-rating: uint,
+        rating-count: uint
+    }
+)
+
+(define-map user-ratings
+    { outfit-id: uint, renter: principal }
+    bool
 )
 
 (define-public (stake-stx (amount uint))
@@ -229,4 +244,40 @@
         })
         err-not-found
     )
+)
+
+(define-public (rate-outfit (outfit-id uint) (rating uint))
+    (let
+        (
+            (rental (unwrap! (map-get? rentals outfit-id) err-not-found))
+            (current-ratings (default-to { total-rating: u0, rating-count: u0 } (map-get? outfit-ratings outfit-id)))
+            (rating-key { outfit-id: outfit-id, renter: tx-sender })
+            (has-rated (default-to false (map-get? user-ratings rating-key)))
+        )
+        (asserts! (is-eq (get renter rental) tx-sender) err-not-renter)
+        (asserts! (get returned rental) err-not-returned)
+        (asserts! (not has-rated) err-already-returned)
+        (asserts! (and (>= rating u1) (<= rating u5)) err-invalid-rating)
+        (map-set outfit-ratings outfit-id {
+            total-rating: (+ (get total-rating current-ratings) rating),
+            rating-count: (+ (get rating-count current-ratings) u1)
+        })
+        (map-set user-ratings rating-key true)
+        (ok true)
+    )
+)
+
+(define-read-only (get-outfit-rating (outfit-id uint))
+    (match (map-get? outfit-ratings outfit-id)
+        ratings
+        (ok {
+            average-rating: (/ (* (get total-rating ratings) u100) (get rating-count ratings)),
+            total-ratings: (get rating-count ratings)
+        })
+        (ok { average-rating: u0, total-ratings: u0 })
+    )
+)
+
+(define-read-only (has-user-rated (outfit-id uint) (user principal))
+    (ok (default-to false (map-get? user-ratings { outfit-id: outfit-id, renter: user })))
 )
